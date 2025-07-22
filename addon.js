@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gildovní Tržiště
 // @namespace    Violentmonkey Scripts
-// @version      0.7
+// @version      0.8
 // @description  Rychlý výběr itemů na prodej a odeslání na endpoint, vylepšené UI a opravy chyb.
 // @author       Psyche
 // @match        *://*/*
@@ -17,6 +17,8 @@
         return;
     }
 
+    console.log("Script started!")
+
     const targetSelector = '.inventory_box.ui-droppable-grid';
 
     const useable_scrolls = [
@@ -29,6 +31,11 @@
       'otevřených ran', 'ohně', 'pekla', 'rychlosti', 'šílenství', 'smrti', 'samoty',
       'slávy', 'úspěchu', 'utrpení', 'vraždy', 'záře', 'zkázy', 'země', 'zloby', 'pekla',
       'křídel', 'šera', 'zimy', 'tepla', 'trápení', 'hlubiny', 'malátnosti'
+    ];
+
+    const maleficaKeywords = [
+      'měchy', 'kladivo', 'čtyřlístek', 'kovadlina',
+      'anvil', 'bellows', 'clover', 'hammer'
     ];
 
     const waitForElement = (selector, callback) => {
@@ -83,7 +90,7 @@
     }
 
     function getUserId() {
-      const playerNameElement = document.querySelector('.playername_achievement.ellipsis');
+      const playerNameElement = document.querySelector('.playername_achievement.ellipsis, .playername.ellipsis');
       if (playerNameElement) {
         return playerNameElement.dataset.userId ||
                playerNameElement.getAttribute('data-user-id') ||
@@ -175,15 +182,15 @@
       if (playerId) {
           GM_xmlhttpRequest({
               method: "GET",
-              url: `https://lz.clans.pro/api/my-offers/${playerId}`,
+              url: `https://lz.clans.pro/api/notifications/${playerId}`,
               onload: function(response) {
                   if (response.status === 200) {
                       try {
-                          const offers = JSON.parse(response.responseText);
-                          const reservedCount = offers.filter(o => o.status === 'reserved').length;
-                          if (reservedCount > 0) {
+                          const notifications = JSON.parse(response.responseText);
+                          const totalNotifications = notifications.reservedItems + notifications.soldPurchases;
+                          if (totalNotifications > 0) {
                               const notificationBadge = document.createElement('span');
-                              notificationBadge.textContent = reservedCount;
+                              notificationBadge.textContent = totalNotifications;
                               notificationBadge.style.position = 'absolute';
                               notificationBadge.style.top = '-8px';
                               notificationBadge.style.right = '-8px';
@@ -196,7 +203,7 @@
                               notificationBadge.style.border = '1px solid #fff';
                               btn.appendChild(notificationBadge);
                           }
-                      } catch (e) { console.error("Chyba při parsování nabídek pro notifikaci:", e); }
+                      } catch (e) { console.error("Chyba při parsování notifikací:", e); }
                   }
               }
           });
@@ -265,6 +272,10 @@
               fetchAndDisplayMyOffers();
               tabContents[id].dataset.loaded = 'true';
           }
+          if (id === 'moje-nakupy' && !tabContents[id].dataset.loaded) {
+              fetchAndDisplayMyPurchases();
+              tabContents[id].dataset.loaded = 'true';
+          }
           if (id === 'trziste' && !tabContents[id].dataset.loaded) {
               const firstCategoryButton = trzisteContent.querySelector('button');
               if (firstCategoryButton) firstCategoryButton.click();
@@ -304,6 +315,7 @@
       createTab('prodat', 'Prodat');
       createTab('trziste', 'Tržiště');
       createTab('moje-nabidky', 'Moje nabídky');
+      createTab('moje-nakupy', 'Moje nákupy');
 
       modal.appendChild(tabsContainer);
       modal.appendChild(contentContainer);
@@ -340,12 +352,27 @@
         wrapper.style.borderBottom = '1px solid rgba(117, 99, 59, 0.57)';
         wrapper.style.display = 'flex';
         wrapper.style.alignItems = 'center';
+        wrapper.style.gap = '10px';
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.value = item.id;
         checkbox.name = 'items';
-        checkbox.style.marginRight = '10px';
+        wrapper.appendChild(checkbox);
+
+        const imageContainer = document.createElement('div');
+        imageContainer.style.flexShrink = '0';
+
+        const lowerName = item.name.toLowerCase();
+        const isScroll = lowerName.includes('svitek');
+        const isMalefica = maleficaKeywords.some(keyword => lowerName.includes(keyword.toLowerCase()));
+
+        if (item.itemClass && (isScroll || isMalefica)) {
+            const itemImage = document.createElement('div');
+            itemImage.className = item.itemClass;
+            imageContainer.appendChild(itemImage);
+        }
+        wrapper.appendChild(imageContainer);
 
         const label = document.createElement('div');
         label.style.flexGrow = '1';
@@ -406,7 +433,6 @@
         inputsContainer.appendChild(amountInput);
         inputsContainer.appendChild(priceInput);
 
-        wrapper.appendChild(checkbox);
         nameWrapper.appendChild(name);
         label.appendChild(nameWrapper);
         label.appendChild(info);
@@ -649,7 +675,29 @@
       myOffersListContainer.id = 'my-offers-list-container';
       mojeNabidkyContent.appendChild(myOffersListContainer);
 
-      const deleteOffer = (itemId) => {
+      const markAsSold = (itemId) => {
+          const sellerId = getUserId();
+          GM_xmlhttpRequest({
+              method: "PATCH",
+              url: `https://lz.clans.pro/api/marketplace/${itemId}/sold`,
+              headers: { "Content-Type": "application/json" },
+              data: JSON.stringify({ sellerId: sellerId }),
+              onload: function(response) {
+                  if (response.status === 200) {
+                      alert('Předmět označen jako prodaný.');
+                      fetchAndDisplayMyOffers();
+                  } else {
+                      alert(`Chyba při označování předmětu: ${response.statusText}`);
+                  }
+              },
+              onerror: function(error) {
+                  console.error('Chyba sítě při označování předmětu:', error);
+                  alert('Chyba sítě při označování předmětu.');
+              }
+          });
+      };
+
+      const deleteOffer = (itemId, onSuccessCallback) => {
           const playerId = getUserId();
           GM_xmlhttpRequest({
               method: "DELETE",
@@ -658,8 +706,7 @@
               data: JSON.stringify({ playerId: playerId }),
               onload: function(response) {
                   if (response.status === 200) {
-                      alert('Operace byla úspěšně provedena.');
-                      fetchAndDisplayMyOffers();
+                      if (onSuccessCallback) onSuccessCallback();
                   } else {
                       alert(`Chyba při provádění operace: ${response.statusText}`);
                   }
@@ -692,11 +739,23 @@
               wrapper.style.borderBottom = '1px solid rgba(117, 99, 59, 0.57)';
               wrapper.style.display = 'flex';
               wrapper.style.alignItems = 'center';
+              wrapper.style.gap = '10px';
 
               if (item.status === 'reserved') {
                   wrapper.style.background = 'rgba(255, 215, 0, 0.15)';
                   wrapper.style.borderLeft = '3px solid #ffd700';
               }
+
+              const imageContainer = document.createElement('div');
+              imageContainer.style.flexShrink = '0';
+
+              const itemCategoriesWithImages = ['material', 'malefica', 'scroll'];
+              if (item.itemClass && itemCategoriesWithImages.includes(item.category)) {
+                  const itemImage = document.createElement('div');
+                  itemImage.className = item.itemClass;
+                  imageContainer.appendChild(itemImage);
+              }
+              wrapper.appendChild(imageContainer);
 
               const label = document.createElement('div');
               label.style.flexGrow = '1';
@@ -737,7 +796,7 @@
                       if (confirm(`Opravdu chcete zrušit nabídku pro "${displayName}"?`)) {
                           cancelButton.disabled = true;
                           cancelButton.textContent = 'Ruším...';
-                          deleteOffer(item._id);
+                          deleteOffer(item._id, () => { alert('Nabídka byla zrušena.'); fetchAndDisplayMyOffers(); });
                       }
                   };
                   buttonsContainer.appendChild(cancelButton);
@@ -751,10 +810,10 @@
                   soldButton.style.color = '#451111';
                   soldButton.style.border = '1px solid #E9A0A0';
                   soldButton.onclick = () => {
-                      if (confirm(`Potvrdit prodej položky "${displayName}" hráči ${item.buyerId}? Tímto se nabídka smaže.`)) {
+                      if (confirm(`Potvrdit prodej položky "${displayName}" hráči ${item.buyerId}?`)) {
                           soldButton.disabled = true;
-                          soldButton.textContent = 'Mažu...';
-                          deleteOffer(item._id);
+                          soldButton.textContent = 'Ukládám...';
+                          markAsSold(item._id);
                       }
                   };
                   buttonsContainer.appendChild(soldButton);
@@ -792,6 +851,138 @@
               onerror: function(error) {
                   console.error('Chyba síťového požadavku na mé nabídky:', error);
                   myOffersListContainer.innerHTML = '<p style="text-align: center; color: red; padding: 20px;">Chyba sítě při načítání dat.</p>';
+              }
+          });
+      };
+
+      // --- MOJE NAKUPY CONTENT ---
+      const mojeNakupyContent = tabContents['moje-nakupy'];
+      const myPurchasesListContainer = document.createElement('div');
+      myPurchasesListContainer.id = 'my-purchases-list-container';
+      mojeNakupyContent.appendChild(myPurchasesListContainer);
+
+      const displayMyPurchases = (purchases) => {
+          myPurchasesListContainer.innerHTML = '';
+          if (!purchases || purchases.length === 0) {
+              myPurchasesListContainer.innerHTML = '<p style="text-align: center; padding: 20px;">Zatím nemáte žádné nákupy.</p>';
+              return;
+          }
+
+          purchases.sort((a, b) => {
+              if (a.status === 'sold' && b.status !== 'sold') return -1;
+              if (a.status !== 'sold' && b.status === 'sold') return 1;
+              return new Date(b.updatedAt) - new Date(a.updatedAt);
+          });
+
+          purchases.forEach(item => {
+              const wrapper = document.createElement('div');
+              wrapper.style.padding = '10px';
+              wrapper.style.borderBottom = '1px solid rgba(117, 99, 59, 0.57)';
+              wrapper.style.display = 'flex';
+              wrapper.style.alignItems = 'center';
+              wrapper.style.gap = '10px';
+
+              const imageContainer = document.createElement('div');
+              imageContainer.style.flexShrink = '0';
+
+              const itemCategoriesWithImages = ['material', 'malefica', 'scroll'];
+              if (item.itemClass && itemCategoriesWithImages.includes(item.category)) {
+                  const itemImage = document.createElement('div');
+                  itemImage.className = item.itemClass;
+                  imageContainer.appendChild(itemImage);
+              }
+              wrapper.appendChild(imageContainer);
+
+              const contentWrapper = document.createElement('div');
+              contentWrapper.style.flexGrow = '1';
+              contentWrapper.style.display = 'flex';
+              contentWrapper.style.flexDirection = 'column';
+
+              const name = document.createElement('div');
+              const displayName = (item.amount && item.amount > 1) ? `${item.amount}x ${item.name}` : item.name;
+              name.textContent = displayName;
+              name.style.fontWeight = 'bold';
+              name.style.color = item.color || '#fff';
+
+              const priceInfo = document.createElement('div');
+              const formattedPrice = formatPrice(item.customPrice);
+              priceInfo.innerHTML = `<span style="font-size: 12px; font-weight: 300; color: #bbb">Cena: ${formattedPrice} <img alt="" src="//gf3.geo.gfsrv.net/cdn6b/71e68d38f81ee6f96a618f33c672e0.gif" align="absmiddle" border="0"></span>`;
+
+              const sellerInfo = document.createElement('div');
+              sellerInfo.innerHTML = `<span style="font-size: 11px; color: #ddd;">Prodejce: ${item.playerId}</span>`;
+              sellerInfo.style.marginTop = '4px';
+
+              contentWrapper.appendChild(name);
+              contentWrapper.appendChild(priceInfo);
+              contentWrapper.appendChild(sellerInfo);
+
+              const statusContainer = document.createElement('div');
+              statusContainer.style.display = 'flex';
+              statusContainer.style.flexDirection = 'column';
+              statusContainer.style.alignItems = 'flex-end';
+              statusContainer.style.gap = '5px';
+
+              const statusText = document.createElement('span');
+              statusText.style.fontSize = '11px';
+
+              if (item.status === 'sold') {
+                  wrapper.style.background = 'rgba(70, 130, 20, 0.15)';
+                  wrapper.style.borderLeft = '3px solid #468214';
+                  statusText.textContent = 'Čeká na vyzvednutí';
+                  statusText.style.color = '#6ab04c';
+
+                  const acceptButton = document.createElement('button');
+                  acceptButton.textContent = 'Koupeno';
+                  acceptButton.className = 'expedition_button awesome-button';
+                  acceptButton.onclick = () => {
+                      if (confirm(`Opravdu chcete potvrdit převzetí a odstranit položku "${displayName}" z historie?`)) {
+                          acceptButton.disabled = true;
+                          acceptButton.textContent = 'Mažu...';
+                          deleteOffer(item._id, fetchAndDisplayMyPurchases);
+                      }
+                  };
+                  statusContainer.appendChild(acceptButton);
+
+              } else { // reserved
+                  statusText.textContent = 'Rezervováno';
+                  statusText.style.color = '#ffd700';
+              }
+
+              statusContainer.insertBefore(statusText, statusContainer.firstChild);
+
+              wrapper.appendChild(contentWrapper);
+              wrapper.appendChild(statusContainer);
+              myPurchasesListContainer.appendChild(wrapper);
+          });
+      };
+
+      const fetchAndDisplayMyPurchases = () => {
+          myPurchasesListContainer.innerHTML = '<p style="text-align: center; padding: 20px;">Načítání vašich nákupů...</p>';
+          const buyerId = getUserId();
+          if (!buyerId) {
+              myPurchasesListContainer.innerHTML = '<p style="text-align: center; color: red; padding: 20px;">ID hráče nebylo nalezeno.</p>';
+              return;
+          }
+          GM_xmlhttpRequest({
+              method: "GET",
+              url: `https://lz.clans.pro/api/my-purchases/${buyerId}`,
+              onload: function(response) {
+                  if (response.status === 200) {
+                      try {
+                          const purchases = JSON.parse(response.responseText);
+                          displayMyPurchases(purchases);
+                      } catch (e) {
+                          console.error("Chyba při parsování odpovědi z mých nákupů:", e);
+                          myPurchasesListContainer.innerHTML = '<p style="text-align: center; color: red; padding: 20px;">Nepodařilo se zpracovat data.</p>';
+                      }
+                  } else {
+                      console.error('Chyba při načítání mých nákupů: ', response.status, response.responseText);
+                      myPurchasesListContainer.innerHTML = `<p style="text-align: center; color: red; padding: 20px;">Chyba ${response.status} při načítání dat.</p>`;
+                  }
+              },
+              onerror: function(error) {
+                  console.error('Chyba síťového požadavku na mé nákupy:', error);
+                  myPurchasesListContainer.innerHTML = '<p style="text-align: center; color: red; padding: 20px;">Chyba sítě při načítání dat.</p>';
               }
           });
       };
