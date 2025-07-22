@@ -6,6 +6,8 @@
 // @author       Psyche
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
+// @updateURL    https://raw.githubusercontent.com/PsychedelicCZ/LZ-Addon/main/addon.js
+// @downloadURL  https://raw.githubusercontent.com/PsychedelicCZ/LZ-Addon/main/addon.js
 // ==/UserScript==
 
 (function () {
