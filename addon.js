@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gildovní Tržiště
 // @namespace    Violentmonkey Scripts
-// @version      0.9
+// @version      1.0
 // @description  Rychlý výběr itemů na prodej a odeslání na endpoint, vylepšené UI a opravy chyb.
 // @author       Psyche
 // @match        *://*/*
@@ -43,7 +43,7 @@
 
         const searchContainer = document.createElement('div');
         searchContainer.id = 'scroll-searcher';
-        searchContainer.className = 'advanced_menu_entry';
+        searchContainer.className = 'menuitem';
         searchContainer.style.cssText = `
             position: relative;
             margin-bottom: 2px;
