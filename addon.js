@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gildovní Tržiště
 // @namespace    Violentmonkey Scripts
-// @version      0.8
+// @version      0.9
 // @description  Rychlý výběr itemů na prodej a odeslání na endpoint, vylepšené UI a opravy chyb.
 // @author       Psyche
 // @match        *://*/*
@@ -12,14 +12,6 @@
 
 (function () {
     'use strict';
-
-    if (!window.location.search.includes('mod=overview')) {
-        return;
-    }
-
-    console.log("Script started!")
-
-    const targetSelector = '.inventory_box.ui-droppable-grid';
 
     const useable_scrolls = [
       'antoniovo', 'gaias', 'gaiovo', 'ichoruovo', 'luciovo', 'marcellovo',
@@ -32,6 +24,169 @@
       'slávy', 'úspěchu', 'utrpení', 'vraždy', 'záře', 'zkázy', 'země', 'zloby', 'pekla',
       'křídel', 'šera', 'zimy', 'tepla', 'trápení', 'hlubiny', 'malátnosti'
     ];
+
+    function saveSettings(settings) {
+        localStorage.setItem('gladiatus_addon_settings', JSON.stringify(settings));
+    }
+
+    function loadSettings() {
+        const saved = localStorage.getItem('gladiatus_addon_settings');
+        return saved ? JSON.parse(saved) : { showScrollSearcher: true };
+    }
+
+    function createScrollSearcher() {
+        const settings = loadSettings();
+        if (!settings.showScrollSearcher) return;
+
+        const mainMenu = document.getElementById('mainmenu');
+        if (!mainMenu) return;
+
+        const searchContainer = document.createElement('div');
+        searchContainer.id = 'scroll-searcher';
+        searchContainer.className = 'advanced_menu_entry';
+        searchContainer.style.cssText = `
+            position: relative;
+            margin-bottom: 2px;
+        `;
+
+        const searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.placeholder = 'Vyhledat svitek...';
+        searchInput.className = 'menuitem';
+        searchInput.style.cssText = `
+            padding: 8px 12px;
+            background: transparent;
+            color: #BFAE54;
+            border: 1px solid #BFAE54;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: inherit;
+            box-sizing: border-box;
+            cursor: text;
+            outline: none;
+        `;
+
+        const suggestionsContainer = document.createElement('div');
+        suggestionsContainer.style.cssText = `
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 2px;
+            border: 1px solid #BFAE54;
+            border-radius: 4px;
+            background: #30140A;
+            display: none;
+            z-index: 1000;
+        `;
+
+        function showSuggestions(query) {
+            if (!query.trim()) {
+                suggestionsContainer.style.display = 'none';
+                return;
+            }
+
+            const filtered = useable_scrolls.filter(scroll =>
+                scroll.toLowerCase().includes(query.toLowerCase())
+            );
+
+            if (filtered.length === 0) {
+                suggestionsContainer.style.display = 'none';
+                return;
+            }
+
+            suggestionsContainer.innerHTML = '';
+
+            filtered.forEach(scroll => {
+                const suggestionItem = document.createElement('div');
+                suggestionItem.style.cssText = `
+                    padding: 8px 12px;
+                    cursor: pointer;
+                    border-bottom: 1px solid #BFAE54;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    font-size: 12px;
+                `;
+
+                const scrollName = document.createElement('span');
+                scrollName.textContent = `svitek ${scroll}`;
+                scrollName.style.color = '#BFAE54';
+
+                const checkIcon = document.createElement('span');
+                checkIcon.textContent = '✓';
+                checkIcon.style.cssText = `
+                    color: #0f0;
+                    font-weight: bold;
+                    font-size: 14px;
+                `;
+                checkIcon.title = 'Použitelný svitek';
+
+                suggestionItem.appendChild(scrollName);
+                suggestionItem.appendChild(checkIcon);
+
+                suggestionItem.addEventListener('mouseenter', () => {
+                    suggestionItem.style.background = 'rgba(191, 174, 84, 0.2)';
+                });
+                suggestionItem.addEventListener('mouseleave', () => {
+                    suggestionItem.style.background = 'transparent';
+                });
+
+                suggestionItem.addEventListener('click', () => {
+                    searchInput.value = `svitek ${scroll}`;
+                    suggestionsContainer.style.display = 'none';
+                });
+
+                suggestionsContainer.appendChild(suggestionItem);
+            });
+
+            suggestionsContainer.style.display = 'block';
+        }
+
+        searchInput.addEventListener('input', (e) => {
+            showSuggestions(e.target.value);
+        });
+
+        searchInput.addEventListener('focus', () => {
+            if (searchInput.value.trim()) {
+                showSuggestions(searchInput.value);
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!searchContainer.contains(e.target)) {
+                suggestionsContainer.style.display = 'none';
+            }
+        });
+
+        searchContainer.appendChild(searchInput);
+        searchContainer.appendChild(suggestionsContainer);
+
+        mainMenu.insertBefore(searchContainer, mainMenu.firstChild);
+    }
+
+    function removeScrollSearcher() {
+        const existingSearcher = document.getElementById('scroll-searcher');
+        if (existingSearcher) {
+            existingSearcher.remove();
+        }
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', createScrollSearcher);
+    } else {
+        createScrollSearcher();
+    }
+
+    if (!window.location.search.includes('mod=overview')) {
+        return;
+    }
+
+    console.log("Script started!")
+
+    const targetSelector = '.inventory_box.ui-droppable-grid';
 
     const maleficaKeywords = [
       'měchy', 'kladivo', 'čtyřlístek', 'kovadlina',
@@ -316,6 +471,7 @@
       createTab('trziste', 'Tržiště');
       createTab('moje-nabidky', 'Moje nabídky');
       createTab('moje-nakupy', 'Moje nákupy');
+      createTab('nastaveni', 'Nastavení');
 
       modal.appendChild(tabsContainer);
       modal.appendChild(contentContainer);
@@ -943,7 +1099,7 @@
                   };
                   statusContainer.appendChild(acceptButton);
 
-              } else { // reserved
+              } else {
                   statusText.textContent = 'Rezervováno';
                   statusText.style.color = '#ffd700';
               }
@@ -986,6 +1142,81 @@
               }
           });
       };
+
+      // --- NASTAVENI CONTENT ---
+      const nastaveniContent = tabContents['nastaveni'];
+      nastaveniContent.style.padding = '20px';
+
+      const settingsTitle = document.createElement('h3');
+      settingsTitle.textContent = 'Nastavení addonu';
+      settingsTitle.style.marginTop = '0';
+      settingsTitle.style.marginBottom = '20px';
+      settingsTitle.style.color = '#fff';
+      nastaveniContent.appendChild(settingsTitle);
+
+      const settings = loadSettings();
+
+      const scrollSearcherSetting = document.createElement('div');
+      scrollSearcherSetting.style.display = 'flex';
+      scrollSearcherSetting.style.alignItems = 'center';
+      scrollSearcherSetting.style.gap = '10px';
+
+      const scrollSearcherCheckbox = document.createElement('input');
+      scrollSearcherCheckbox.type = 'checkbox';
+      scrollSearcherCheckbox.id = 'scrollSearcherToggle';
+      scrollSearcherCheckbox.checked = settings.showScrollSearcher;
+      scrollSearcherCheckbox.style.transform = 'scale(1.2)';
+
+      const scrollSearcherLabel = document.createElement('label');
+      scrollSearcherLabel.htmlFor = 'scrollSearcherToggle';
+      scrollSearcherLabel.textContent = 'Zobrazit vyhledávač scrollů v menu';
+      scrollSearcherLabel.style.color = '#fff';
+      scrollSearcherLabel.style.fontSize = '14px';
+      scrollSearcherLabel.style.cursor = 'pointer';
+
+      const scrollSearcherDescription = document.createElement('div');
+      scrollSearcherDescription.textContent = 'Zobrazuje vyhledávací pole s našeptáváním použitelných scrollů v hlavním menu hry.';
+      scrollSearcherDescription.style.fontSize = '12px';
+      scrollSearcherDescription.style.color = '#bbb';
+      scrollSearcherDescription.style.marginTop = '5px';
+      scrollSearcherDescription.style.marginLeft = '30px';
+
+      scrollSearcherSetting.appendChild(scrollSearcherCheckbox);
+      scrollSearcherSetting.appendChild(scrollSearcherLabel);
+      nastaveniContent.appendChild(scrollSearcherSetting);
+      nastaveniContent.appendChild(scrollSearcherDescription);
+
+      scrollSearcherCheckbox.addEventListener('change', () => {
+          const newSettings = { ...settings, showScrollSearcher: scrollSearcherCheckbox.checked };
+          saveSettings(newSettings);
+
+          if (scrollSearcherCheckbox.checked) {
+              createScrollSearcher();
+          } else {
+              removeScrollSearcher();
+          }
+
+          const changeInfo = document.createElement('div');
+          changeInfo.textContent = scrollSearcherCheckbox.checked ?
+              '✓ Vyhledávač scrollů byl zobrazen' :
+              '✓ Vyhledávač scrollů byl skryt';
+          changeInfo.style.color = '#0f0';
+          changeInfo.style.fontSize = '12px';
+          changeInfo.style.marginTop = '10px';
+          changeInfo.style.marginLeft = '30px';
+
+          const existingInfo = nastaveniContent.querySelector('.change-info');
+          if (existingInfo) existingInfo.remove();
+
+          changeInfo.className = 'change-info';
+          nastaveniContent.appendChild(changeInfo);
+
+          setTimeout(() => {
+              if (changeInfo.parentNode) {
+                  changeInfo.remove();
+              }
+          }, 3000);
+      });
 
       setActiveTab('prodat');
 
