@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gildovní Tržiště
 // @namespace    Violentmonkey Scripts
-// @version      1.0
+// @version      1.1
 // @description  Rychlý výběr itemů na prodej a odeslání na endpoint, vylepšené UI a opravy chyb.
 // @author       Psyche
 // @match        *://*/*
@@ -43,10 +43,16 @@
 
         const searchContainer = document.createElement('div');
         searchContainer.id = 'scroll-searcher';
-        searchContainer.className = 'menuitem';
         searchContainer.style.cssText = `
             position: relative;
             margin-bottom: 2px;
+        `;
+
+        const inputContainer = document.createElement('div');
+        inputContainer.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 5px;
         `;
 
         const searchInput = document.createElement('input');
@@ -64,7 +70,49 @@
             box-sizing: border-box;
             cursor: text;
             outline: none;
+            width: calc(100% - 42px);
         `;
+
+        const infoButton = document.createElement('button');
+        infoButton.className = 'menuitem';
+        infoButton.innerHTML = '<img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyUzYuNDggMjIgMTIgMjJTMjIgMTcuNTIgMjIgMTJTMTcuNTIgMiAxMiAyWk0xMyAxN0gxMVYxMUgxM1YxN1pNMTMgOUgxMVY3SDEzVjlaIiBmaWxsPSIjQkZBRTU0Ii8+Cjwvc3ZnPgo=" title="Informace o eventech" height="17" width="17">';
+        infoButton.style.cssText = `
+    background: transparent;
+    color: rgb(191, 174, 84);
+    border: 1px solid rgb(191, 174, 84);
+    border-radius: 4px !important;
+    font-size: 12px;
+    font-family: inherit;
+    box-sizing: border-box;
+    cursor: text;
+    outline: none;
+    width: 28px;
+`;
+
+
+
+
+        const eventsTooltip = document.createElement('div');
+        eventsTooltip.style.cssText = `
+            position: absolute;
+            top: 100%;
+            right: 0;
+            min-width: 350px;
+            max-width: 450px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 8px;
+            border: 1px solid #BFAE54;
+            border-radius: 6px;
+            background: #30140A;
+            display: none;
+            z-index: 1001;
+            padding: 15px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        `;
+
+        inputContainer.appendChild(searchInput);
+        inputContainer.appendChild(infoButton);
 
         const suggestionsContainer = document.createElement('div');
         suggestionsContainer.style.cssText = `
@@ -81,6 +129,159 @@
             display: none;
             z-index: 1000;
         `;
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('cs-CZ', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+            });
+        }
+
+        function getTimeRemaining(targetDate) {
+            const now = new Date();
+            const target = new Date(targetDate);
+            const diff = target - now;
+
+            if (diff <= 0) return null;
+
+            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+            if (days > 0) return `${days}d ${hours}h`;
+            if (hours > 0) return `${hours}h ${minutes}m`;
+            return `${minutes}m`;
+        }
+
+        function isEventActive(start, end) {
+            const now = new Date();
+            return now >= new Date(start) && now <= new Date(end);
+        }
+
+        function loadEvents() {
+            eventsTooltip.innerHTML = '<div style="text-align: center; color: #BFAE54;">Načítání eventů...</div>';
+
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: "https://lz.clans.pro/api/events",
+                onload: function(response) {
+                    if (response.status === 200) {
+                        try {
+                            const data = JSON.parse(response.responseText);
+                            displayEvents(data.events || []);
+                        } catch (e) {
+                            eventsTooltip.innerHTML = '<div style="color: #f00; text-align: center;">Chyba při načítání eventů</div>';
+                        }
+                    } else {
+                        eventsTooltip.innerHTML = '<div style="color: #f00; text-align: center;">Nepodařilo se načíst eventy</div>';
+                    }
+                },
+                onerror: function() {
+                    eventsTooltip.innerHTML = '<div style="color: #f00; text-align: center;">Chyba sítě</div>';
+                }
+            });
+        }
+
+        function displayEvents(events) {
+            if (!events || events.length === 0) {
+                eventsTooltip.innerHTML = '<div style="color: #bbb; text-align: center;">Žádné nadcházející eventy</div>';
+                return;
+            }
+
+            const now = new Date();
+            const sortedEvents = events.sort((a, b) => new Date(a.start) - new Date(b.start));
+
+            let html = '<div style="color: #BFAE54; font-weight: bold; margin-bottom: 12px; text-align: center; font-size: 14px;">📅 Gladiatus Eventy</div>';
+
+            sortedEvents.forEach((event, index) => {
+                const isActive = isEventActive(event.start, event.end);
+                const startDate = formatDate(event.start);
+                const endDate = formatDate(event.end);
+
+                let timeInfo = '';
+                let statusColor = '#bbb';
+                let statusText = '';
+
+                if (isActive) {
+                    const timeLeft = getTimeRemaining(event.end);
+                    statusText = '🟢 Probíhá';
+                    statusColor = '#0f0';
+                    if (timeLeft) timeInfo = ` (končí za ${timeLeft})`;
+                } else if (new Date(event.start) > now) {
+                    const timeToStart = getTimeRemaining(event.start);
+                    statusText = '🔵 Nadcházející';
+                    statusColor = '#4a9eff';
+                    if (timeToStart) timeInfo = ` (za ${timeToStart})`;
+                } else {
+                    statusText = '⚫ Skončený';
+                    statusColor = '#666';
+                }
+
+                html += `
+                    <div style="
+                        margin-bottom: ${index < sortedEvents.length - 1 ? '15px' : '0'};
+                        padding: 10px;
+                        border: 1px solid rgba(191, 174, 84, 0.3);
+                        border-radius: 4px;
+                        background: ${isActive ? 'rgba(0, 255, 0, 0.05)' : 'rgba(191, 174, 84, 0.05)'};
+                    ">
+                        <div style="
+                            font-weight: bold;
+                            color: #fff;
+                            margin-bottom: 6px;
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                        ">
+                            <span>${startDate} - ${endDate}</span>
+                            <span style="color: ${statusColor}; font-size: 11px;">${statusText}</span>
+                        </div>
+                        ${timeInfo ? `<div style="color: #ffd700; font-size: 11px; margin-bottom: 8px;">${timeInfo}</div>` : ''}
+                        <div style="color: #ddd; line-height: 1.4;">
+                            ${event.bonuses.map(bonus => `• ${bonus}`).join('<br>')}
+                        </div>
+                    </div>
+                `;
+            });
+
+            eventsTooltip.innerHTML = html;
+        }
+
+        function showEvents() {
+            loadEvents();
+            eventsTooltip.style.display = 'block';
+        }
+
+        function hideEvents() {
+            eventsTooltip.style.display = 'none';
+        }
+
+        // Event handlers for info button
+        infoButton.addEventListener('mouseenter', () => {
+            infoButton.style.background = 'rgba(191, 174, 84, 0.2)';
+            infoButton.style.borderRadius = '4px';
+            showEvents();
+        });
+
+        infoButton.addEventListener('mouseleave', () => {
+            infoButton.style.background = 'transparent';
+            infoButton.style.borderRadius = '4px';
+            setTimeout(() => {
+                if (!eventsTooltip.matches(':hover') && !infoButton.matches(':hover')) {
+                    hideEvents();
+                }
+            }, 100);
+        });
+
+        eventsTooltip.addEventListener('mouseenter', () => {
+            eventsTooltip.style.display = 'block';
+        });
+
+        eventsTooltip.addEventListener('mouseleave', () => {
+            hideEvents();
+        });
 
         function showSuggestions(query) {
             if (!query.trim()) {
@@ -158,11 +359,13 @@
         document.addEventListener('click', (e) => {
             if (!searchContainer.contains(e.target)) {
                 suggestionsContainer.style.display = 'none';
+                hideEvents();
             }
         });
 
-        searchContainer.appendChild(searchInput);
+        searchContainer.appendChild(inputContainer);
         searchContainer.appendChild(suggestionsContainer);
+        searchContainer.appendChild(eventsTooltip);
 
         mainMenu.insertBefore(searchContainer, mainMenu.firstChild);
     }
@@ -833,17 +1036,24 @@
 
       const markAsSold = (itemId) => {
           const sellerId = getUserId();
+          console.log('Označuji jako prodáno:', { itemId, sellerId }); // Debug log
           GM_xmlhttpRequest({
               method: "PATCH",
               url: `https://lz.clans.pro/api/marketplace/${itemId}/sold`,
               headers: { "Content-Type": "application/json" },
               data: JSON.stringify({ sellerId: sellerId }),
               onload: function(response) {
+                  console.log('Odpověď serveru:', response.status, response.responseText); // Debug log
                   if (response.status === 200) {
                       alert('Předmět označen jako prodaný.');
                       fetchAndDisplayMyOffers();
                   } else {
-                      alert(`Chyba při označování předmětu: ${response.statusText}`);
+                      try {
+                          const errorResponse = JSON.parse(response.responseText);
+                          alert(`Chyba při označování předmětu: ${errorResponse.error || response.statusText}`);
+                      } catch (e) {
+                          alert(`Chyba při označování předmětu: ${response.statusText}`);
+                      }
                   }
               },
               onerror: function(error) {
@@ -870,6 +1080,34 @@
               onerror: function(error) {
                   console.error('Chyba sítě při operaci:', error);
                   alert('Chyba sítě při provádění operace.');
+              }
+          });
+      };
+
+      const deletePurchase = (itemId, onSuccessCallback) => {
+          const buyerId = getUserId();
+          console.log('Mažu nákup:', { itemId, buyerId }); // Debug log
+          GM_xmlhttpRequest({
+              method: "DELETE",
+              url: `https://lz.clans.pro/api/purchase/${itemId}`,
+              headers: { "Content-Type": "application/json" },
+              data: JSON.stringify({ buyerId: buyerId }),
+              onload: function(response) {
+                  console.log('Odpověď serveru při mazání nákupu:', response.status, response.responseText); // Debug log
+                  if (response.status === 200) {
+                      if (onSuccessCallback) onSuccessCallback();
+                  } else {
+                      try {
+                          const errorResponse = JSON.parse(response.responseText);
+                          alert(`Chyba při mazání nákupu: ${errorResponse.error || response.statusText}`);
+                      } catch (e) {
+                          alert(`Chyba při mazání nákupu: ${response.statusText}`);
+                      }
+                  }
+              },
+              onerror: function(error) {
+                  console.error('Chyba sítě při mazání nákupu:', error);
+                  alert('Chyba sítě při mazání nákupu.');
               }
           });
       };
@@ -1094,7 +1332,7 @@
                       if (confirm(`Opravdu chcete potvrdit převzetí a odstranit položku "${displayName}" z historie?`)) {
                           acceptButton.disabled = true;
                           acceptButton.textContent = 'Mažu...';
-                          deleteOffer(item._id, fetchAndDisplayMyPurchases);
+                          deletePurchase(item._id, fetchAndDisplayMyPurchases);
                       }
                   };
                   statusContainer.appendChild(acceptButton);
